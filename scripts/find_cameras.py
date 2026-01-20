@@ -12,6 +12,9 @@ import os
 import cv2
 from concurrent.futures import ThreadPoolExecutor
 
+# Configuration
+INTERVAL_SECONDS = 60
+
 def is_rtsp_valid(rtsp_url, timeout_sec=15):
     """
     Checks if an RTSP URL is valid by attempting to grab a single frame.
@@ -189,11 +192,25 @@ def main():
 
     args = parser.parse_args()
 
-    results = scan_subnet(args.subnet, args.port, args.threads)
+    print(f"Starting Camera Scanner. Interval: {INTERVAL_SECONDS}s")
+
+    while True:
+        start_time = time.time()
+
+        results = scan_subnet(args.subnet, args.port, args.threads)
+
+        elapsed = time.time() - start_time
+        sleep_time = max(0, INTERVAL_SECONDS - elapsed)
+
+        time.sleep(sleep_time)
 
     # Output solely the JSON array to stdout so it can be piped
     print(json.dumps(results, indent=4))
     write_array_to_json_file(results, "/var/www/html/cameras.json")
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\nStopping monitor...")
+        sys.exit(0)
