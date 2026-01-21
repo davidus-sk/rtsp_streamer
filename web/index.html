@@ -9,6 +9,7 @@
         .container { max-width: 900px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
         h1 { border-bottom: 2px solid #eee; padding-bottom: 10px; margin-bottom: 20px; }
         h2 { font-size: 1.2rem; margin-top: 30px; color: #555; }
+        center { font-size: 0.8rem; margin-top: 10px; color: #aaa; }
 
         .logo img {
            display: block;
@@ -56,6 +57,38 @@
         .error { color: #d9534f; background: #fdf7f7; padding: 10px; border: 1px solid #d9534f; border-radius: 4px; }
         .badge { display: inline-block; padding: 2px 6px; font-size: 0.8rem; border-radius: 4px; color: white; background: #6c757d; }
         .badge-success { background: #28a745; }
+
+        .emoji-heart {
+            cursor: default;
+            
+            /* The Animation Configuration */
+            animation-name: emoji-pulse;
+            animation-duration: 1.2s;
+            animation-timing-function: ease-in-out;
+            animation-iteration-count: infinite;
+        }
+
+        /* The Animation Keyframes */
+        @keyframes emoji-pulse {
+            0% {
+                transform: scale(1);
+            }
+            15% {
+                transform: scale(1.2); /* Grow quickly */
+            }
+            30% {
+                transform: scale(1);   /* Shrink back */
+            }
+            45% {
+                transform: scale(1.15); /* Grow slightly less */
+            }
+            60% {
+                transform: scale(1);   /* Rest */
+            }
+            100% {
+                transform: scale(1);   /* Wait */
+            }
+        }
     </style>
 </head>
 <body>
@@ -63,7 +96,7 @@
 <div class="container">
     <div class="logo"><img src="logo.png" width="300" /></div>
 
-    <h1>Camera Scanner Dashboard</h1>
+    <h1>Streamer Dashboard</h1>
 
     <div id="subnet-section">
         <h2>Network Configuration</h2>
@@ -76,7 +109,7 @@
     </div>
 </div>
 
-<center>Copyright &copy; 2026 LUCEON LLC. All rights reserved.</center>
+<center>Copyright &copy; 2026 LUCEON LLC. All rights reserved. <div class="emoji-heart">❤️</sdiv></center>
 
 <script>
     const SUBNET_FILE = 'subnet.json';

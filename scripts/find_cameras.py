@@ -10,10 +10,12 @@ import sys
 import time
 import os
 import cv2
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 
 # Configuration
 INTERVAL_SECONDS = 60
+script_dir = Path(__file__).parent.resolve()
 
 def is_rtsp_valid(rtsp_url, timeout_sec=15):
     """
@@ -183,7 +185,7 @@ def main():
     else:
         print(f"No subnet found for eth0")
 
-    write_array_to_json_file({"subnet":subnet, "timestamp":time.time()}, "/var/www/html/subnet.json")
+    write_array_to_json_file({"subnet":subnet, "timestamp":time.time()}, f"{script_dir}/../web/subnet.json")
 
     parser = argparse.ArgumentParser(description="Scan a subnet for RTSP cameras.")
     parser.add_argument("--subnet", default=subnet, help="The subnet to scan in CIDR format (e.g., 192.168.1.0/24)")
@@ -206,7 +208,7 @@ def main():
 
     # Output solely the JSON array to stdout so it can be piped
     print(json.dumps(results, indent=4))
-    write_array_to_json_file(results, "/var/www/html/cameras.json")
+    write_array_to_json_file(results, f"{script_dir}/../web/cameras.json")
 
 if __name__ == "__main__":
     try:

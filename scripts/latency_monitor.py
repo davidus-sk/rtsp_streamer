@@ -7,10 +7,12 @@ import platform
 import re
 import os
 import sys
+from pathlib import Path
 
 # Configuration
-INPUT_FILE = '/var/www/html/cameras.json'
-OUTPUT_FILE = '/var/www/html/latency.json'
+script_dir = Path(__file__).parent.resolve()
+INPUT_FILE = f"{script_dir}/../web/cameras.json"
+OUTPUT_FILE = f"{script_dir}/../web/latency.json"
 INTERVAL_SECONDS = 60
 
 def get_latency(ip_address):
@@ -20,13 +22,13 @@ def get_latency(ip_address):
     """
     # Detect OS to determine the correct ping flag
     param = '-n' if platform.system().lower() == 'windows' else '-c'
-    
+
     # Build command: ping -c 1 -W 2 (1 packet, 2 second timeout)
     command = ['ping', param, '1', ip_address]
-    
-    # Linux/Mac usually allow -W for timeout, but syntax varies. 
+
+    # Linux/Mac usually allow -W for timeout, but syntax varies.
     # We rely on subprocess.timeout to catch hangs.
-    
+
     try:
         # Run the ping command
         if platform.system().lower() == 'windows':
@@ -36,12 +38,12 @@ def get_latency(ip_address):
 
         # Regex to parse time (Windows: "time=1ms", Linux: "time=1.23 ms")
         match = re.search(r'time[=<]\s*([\d\.]+)\s*(?:ms)?', output, re.IGNORECASE)
-        
+
         if match:
             return float(match.group(1))
         else:
             return None # Could not parse time
-            
+
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
         return None # Host unreachable
 
@@ -59,16 +61,16 @@ def update_latencies():
 
         # Dictionary to store results keyed by IP
         latency_results = {}
-        
+
         print(f"[{time.strftime('%X')}] Pinging {len(cameras)} devices...")
 
         for cam in cameras:
             ip = cam.get('ip')
             if not ip:
                 continue
-                
+
             ms = get_latency(ip)
-            
+
             # Map the result directly to the IP key
             latency_results[ip] = {
                 "latency_ms": ms,
@@ -80,7 +82,7 @@ def update_latencies():
         temp_file = OUTPUT_FILE + '.tmp'
         with open(temp_file, 'w') as f:
             json.dump(latency_results, f, indent=4)
-        
+
         os.replace(temp_file, OUTPUT_FILE)
         print(f"[{time.strftime('%X')}] Updated {OUTPUT_FILE}")
 
@@ -92,15 +94,15 @@ def update_latencies():
 def main():
     print(f"Starting Latency Monitor. Interval: {INTERVAL_SECONDS}s")
     print("Output format: {'192.168.1.10': {'latency_ms': 12, ...}}")
-    
+
     while True:
         start_time = time.time()
-        
+
         update_latencies()
-        
+
         elapsed = time.time() - start_time
         sleep_time = max(0, INTERVAL_SECONDS - elapsed)
-        
+
         time.sleep(sleep_time)
 
 if __name__ == "__main__":
