@@ -389,19 +389,23 @@ class SharedRTSPPlayer:
                     self.rtsp_url,
                     format="rtsp",
                     options={
+                        #"video_size": "1024x768",
                         "rtsp_transport": "tcp",
-                        "rtsp_flags": "prefer_tcp",
+                        #"rtsp_flags": "prefer_tcp",
                         "fflags": "nobuffer+flush_packets",
                         "flags": "low_delay",
                         "max_delay": "0",
-                        "buffer_size": "65536",
+                        "buffer_size": "1024000",
                         "timeout": "5000000",
                         "reorder_queue_size": "0",
-                        "vn": "0",
-                        "an": "1",
-                        "probesize": "32",  # Smaller probe size
-                        "analyzeduration": "0",  # Don't analyze duration
-                    },
+                        #"framerate": "20", # Set the target FPS (e.g., 60)
+                        "probesize": "32", # Reduce initial analysis time
+                        "analyzeduration": "0", # Start stream immediately
+                        "preset": "ultrafast", # Test
+                        #"tune": "zerolatency", # Test
+                        "vn": "0", # video enabled
+                        "an": "1", # audio disabled
+                    }
                 )
             else:
                 logger.info(
