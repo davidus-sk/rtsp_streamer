@@ -1,5 +1,7 @@
 #!/app/penv/bin/python
 
+import signal
+import sys
 import time
 import json
 import socket
@@ -17,6 +19,14 @@ CAMERAS_FILE = f"{script_dir}/../web/cameras.json"
 UPDATE_INTERVAL = 15  # Seconds
 I2C_PORT = 1
 I2C_ADDRESS = 0x3C    # Standard address for SSD1306
+
+def signal_handler(signum, frame):
+    """
+    Handle the received signal.
+    """
+
+    device.clear()
+    sys.exit(0)
 
 def get_ip_address():
     """
@@ -88,6 +98,9 @@ def get_network_bytes():
     return net.bytes_sent + net.bytes_recv
 
 def main():
+    # Capture signals
+    signal.signal(signal.SIGTERM, signal_handler)
+
     # Initialize Display
     serial = i2c(port=I2C_PORT, address=I2C_ADDRESS)
     device = ssd1306(serial, width=128, height=64) # Adjust height to 32 if you have the smaller screen
@@ -121,7 +134,7 @@ def main():
 
             # Speed in KB/s
             if time_delta > 0:
-                net_speed = (bytes_delta / time_delta) / 1024 
+                net_speed = (bytes_delta / time_delta) / 1024
             else:
                 net_speed = 0
 

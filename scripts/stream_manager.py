@@ -40,7 +40,6 @@ def start_worker(rtsp_url):
 
     cmd = [
         str(script_path),
-        '--config', f"{script_dir}/../conf/config.json",
         '--rtsp-url', rtsp_url
     ]
 

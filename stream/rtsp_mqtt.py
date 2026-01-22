@@ -8,11 +8,11 @@ import gc
 import hashlib
 import json
 import logging
+import os
 import random
 import re
 import signal
 import string
-import subprocess
 import sys
 import threading
 import time
@@ -23,6 +23,7 @@ from typing import Any, Optional
 # from aiohttp import web
 import paho.mqtt.client as paho
 from aiortc import (
+    MediaStreamError,
     RTCConfiguration,
     RTCIceServer,
     RTCPeerConnection,
@@ -41,34 +42,14 @@ from av import VideoFrame
 # utlx
 # rtsp://172.21.114.30/profile2/media.smp
 
+# Interval in seconds for sending /status messages via MQTT
+# This controls how frequently the script publishes status updates
+STATUS_INTERVAL = 20
+
 exit_event = threading.Event()
 logger = logging.getLogger("rtsp_mqtt")
 mqtt_pub = None
 main_loop = None
-
-
-def parse_arguments():
-    parser = argparse.ArgumentParser()
-
-    parser.add_argument(
-        "-ro",
-        "--read-only",
-        help="Read only mode",
-        action="store_true",
-        default=False,
-    )
-
-    parser.add_argument(
-        "--config", help="Config path", default="/app/rtsp_streamer/conf/config.json"
-    )
-    parser.add_argument("--rtsp-url", help="RTSP url", required=True)
-    parser.add_argument(
-        "--use-relay", help="Use Media Relay", action="store_true", default=False
-    )
-
-    parser.add_argument("--log-level", help="Log level", default="info")
-
-    return parser.parse_args()
 
 
 def handle_signal(signum, frame):
@@ -109,7 +90,8 @@ def init_log(log_level: str | None = None) -> logging.Logger:
     log_console.setLevel(level)
     log_console.setFormatter(
         logging.Formatter(
-            "%(asctime)s [%(levelname).1s] %(message)s", datefmt="%y-%m-%d %H:%M:%S"
+            "%(asctime)s [%(levelname).1s] %(message)s",
+            datefmt="%y-%m-%d %H:%M:%S",
         )
     )
 
@@ -118,30 +100,33 @@ def init_log(log_level: str | None = None) -> logging.Logger:
     return logger
 
 
-def load_config(path: str):
+def load_config(path: str | None = None):
+    """
+    Load configuration from JSON file.
+
+    Args:
+        path: Path to the JSON configuration file
+
+    Returns:
+        dict: Configuration dictionary containing MQTT settings, ICE servers, and stream parameters
+    """
+
+    if path is None:
+        # default config path
+        path = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "conf") + "/config.json"
+        )
+
     try:
         with open(path, "r") as f:
             cfg = json.load(f)
     except FileNotFoundError:
-        logger.error(f"[CONFIG] ERROR: Config file not found at {path}. Exiting.")
+        logger.error(f"[config] Config file not found at {path}. Exiting.")
         sys.exit(100)
     except Exception as e:
-        logger.error(f"[CONFIG] ERROR: Failed to read config: {e}")
+        logger.error(f"[config] {e}")
         sys.exit(101)
     return cfg
-
-
-def get_shell_output(command):
-    try:
-        output = subprocess.check_output(
-            command, shell=True, stderr=subprocess.STDOUT, universal_newlines=True
-        )
-        return output.strip()
-    except Exception as e:
-        logger.error(
-            f"[CONFIG] ERROR: Failed to run shell command for client_id: '{command}' -> {e}"
-        )
-        return None
 
 
 def random_hex_string(length: int = 16):
@@ -150,9 +135,9 @@ def random_hex_string(length: int = 16):
 
 
 def build_mqtt_settings(cfg, rtsp_url: str) -> dict:
-    for k in ("server", "port_s", "username", "client_id"):
+    for k in ("server", "port", "port_s", "username"):
         if k not in cfg:
-            logger.error(f"[CONFIG]: Missing key '{k}' in config file.")
+            logger.error(f"[config]: Missing key '{k}' in config file.")
             sys.exit(102)
 
     mqtt_broker = cfg.get("server")
@@ -160,7 +145,7 @@ def build_mqtt_settings(cfg, rtsp_url: str) -> dict:
     try:
         mqtt_port = int(cfg.get("port_s"))
     except Exception:
-        logger.error("[CONFIG]: Invalid port_s value in config, must be int.")
+        logger.error("[config]: Invalid port_s value in config, must be int.")
         sys.exit(103)
 
     mqtt_username = cfg.get("username")
@@ -175,7 +160,7 @@ def build_mqtt_settings(cfg, rtsp_url: str) -> dict:
     device_id = md5
 
     if not device_id:
-        logger.error("[CONFIG]: Could not determine 'client_id', exiting.")
+        logger.error("[config]: Could not determine 'client_id', exiting.")
         sys.exit(104)
 
     return dict(
@@ -192,41 +177,54 @@ def build_mqtt_settings(cfg, rtsp_url: str) -> dict:
     )
 
 
-def filter_sdp_h264_only(sdp: str) -> str:
-    lines = sdp.splitlines()
-    out = []
-    h264_pts = set()
-    rtx_pts = set()
+def build_ice_servers(cfg: dict) -> list:
+    """
+    Build RTCIceServer list from config.
 
-    for line in lines:
-        if line.startswith("a=rtpmap:") and "H264/90000" in line:
-            pt = line.split(":")[1].split()[0]
-            h264_pts.add(pt)
+    Returns:
+        List of RTCIceServer objects
+    """
+    ice_servers = []
+    add_default = False
 
-    for line in lines:
-        if line.startswith("a=fmtp:"):
-            m = re.match(r"a=fmtp:(\d+)\s+apt=(\d+)", line)
-            if m and m.group(2) in h264_pts:
-                rtx_pts.add(m.group(1))
+    if "ice_servers" in cfg and isinstance(cfg["ice_servers"], list):
+        if len(cfg["ice_servers"]):
+            for server_config in cfg["ice_servers"]:
+                if "urls" not in server_config:
+                    logger.warning("[webrtc] ICE server entry missing 'urls', skipping")
+                    continue
 
-    allowed_pts = h264_pts | rtx_pts
+                urls = server_config["urls"]
+                username = server_config.get("username")
+                credential = server_config.get("credential")
+                credential_type = server_config.get("credentialType", "password")
 
-    for line in lines:
-        if line.startswith("m=video"):
-            parts = line.split()
-            header = parts[:3]
-            payloads = [pt for pt in parts[3:] if pt in allowed_pts]
-            out.append(" ".join(header + payloads))
-            continue
+                try:
+                    # Build kwargs conditionally based on whether auth is provided
+                    kwargs = {"urls": urls}
+                    if username and credential:
+                        kwargs["username"] = username
+                        kwargs["credential"] = credential
+                        kwargs["credentialType"] = credential_type
 
-        if line.startswith(("a=rtpmap:", "a=fmtp:", "a=rtcp-fb:")):
-            pt = line.split(":")[1].split()[0]
-            if pt not in allowed_pts:
-                continue
+                    ice_server = RTCIceServer(**kwargs)
+                    ice_servers.append(ice_server)
+                    logger.debug(f"[webrtc] added ICE server: {urls}")
+                except Exception as e:
+                    logger.warning(
+                        f"[webrtc] failed to create ICE server from {urls}: {e}"
+                    )
+        else:
+            add_default = True
 
-        out.append(line)
+    if add_default:
+        # Default fallback ICE servers
+        url = "stun:stun.l.google.com:19302"
+        ice_servers.append(RTCIceServer(urls=[url]))
+        logger.debug("[webrtc] no 'ice_servers' found in config")
+        logger.debug(f"[webrtc] added default ICE server {url}")
 
-    return "\r\n".join(out) + "\r\n"
+    return ice_servers
 
 
 def force_codec(pc: RTCPeerConnection, sender: RTCRtpSender, forced_codec: str) -> None:
@@ -278,10 +276,13 @@ class NonBufferedVideoTrack(VideoStreamTrack):
                     frame_count += 1
                     if frame_count % 100 == 0:
                         gc.collect(generation=0)  # Quick generation 0 collection
-
+                except MediaStreamError as e:
+                    if not self._stopping:
+                        logger.warning(f"[track ] MediaStreamError: {e}")
+                    break
                 except Exception as e:
                     if not self._stopping:
-                        logger.error(f"[track ] Error fetching frame: {e}")
+                        logger.warning(f"[track ] Error fetching frame: {e}")
                     break
         except asyncio.CancelledError:
             pass
@@ -631,7 +632,10 @@ class SharedRTSPPlayer:
                     f"[cam   ] {self.device_id} ~~~ created non-buffered wrapper track (no relay)"
                 )
 
-                return wrapped_track, True  # Return True so it gets cleaned up properly
+                return (
+                    wrapped_track,
+                    True,
+                )  # Return True so it gets cleaned up properly
 
     async def shutdown(self):
         """Shutdown the player and cleanup all resources."""
@@ -644,8 +648,10 @@ class MQTTPublisher:
     SDP_OFFER_PATTERN = re.compile(r"(device-)?[0-9a-fA-F]{16}/sdp/([^/]+)/offer")
     ICE_OFFER_PATTERN = re.compile(r"(device-)?[0-9a-fA-F]{16}/ice/([^/]+)/offer")
 
-    def __init__(self, mqtt_settings):
-        self.settings = mqtt_settings
+    def __init__(self, cfg: dict):
+        """Init"""
+
+        self.settings = build_mqtt_settings(cfg, rtsp_url=args.rtsp_url)
         self.peers = {}
 
         # Lock to prevent race conditions during cleanup
@@ -665,8 +671,13 @@ class MQTTPublisher:
 
         self.camera = None
 
+        # mqtt status publishing task
+        self._status_task: Optional[asyncio.Task] = None
+        self._status_interval = args.status if not args.no_status else 0
+
+        # mqtt client
         self.client = paho.Client(
-            callback_api_version=paho.CallbackAPIVersion.VERSION2,
+            callback_api_version=paho.CallbackAPIVersion.VERSION2,  # type: ignore
             client_id=self.settings["client_id"],
             protocol=self.settings["protocol"],
             transport="websockets" if self.settings["use_ws"] else "tcp",
@@ -674,7 +685,8 @@ class MQTTPublisher:
 
         if self.settings["username"]:
             self.client.username_pw_set(
-                self.settings["username"], self.settings["password"]
+                self.settings["username"],
+                self.settings["password"],
             )
 
         if self.settings["use_ws"]:
@@ -685,18 +697,10 @@ class MQTTPublisher:
         self.client.on_disconnect = self._on_disconnect
         self.client.on_message = self._on_message
 
+        # Build ICE servers from config
+        ice_servers = build_ice_servers(cfg)
         self.webrtc_config = RTCConfiguration(
-            # bundlePolicy=RTCBundlePolicy.MAX_BUNDLE,
-            iceServers=[
-                # RTCIceServer(urls=["stun:stun.l.google.com:19302"]),
-                RTCIceServer(urls=["stun:34.200.4.20:3478"]),
-                RTCIceServer(
-                    urls="turn:34.200.4.20:3478",
-                    username="marek",
-                    credential="337caaf1d2",
-                    credentialType="password",
-                ),
-            ],
+            iceServers=ice_servers,
         )
 
     def _on_connect(self, client, userdata, flags, reason_code, properties):
@@ -712,6 +716,10 @@ class MQTTPublisher:
 
         self.subscribe(f"{self.device_id}/sdp/+/offer")
         self.subscribe(f"{self.device_id}/ice/+/offer")
+
+        # Start status publishing task
+        if self._status_interval > 0 and self._connected and main_loop is not None:
+            asyncio.run_coroutine_threadsafe(self._start_status_task(), main_loop)
 
     def _on_message(self, client, userdata, msg):
         sdp_match = self.SDP_OFFER_PATTERN.match(msg.topic)
@@ -778,7 +786,10 @@ class MQTTPublisher:
     def is_peer_connected(self, remote_id: str) -> bool:
         """Check whether the client is connected or not"""
         ctx = self.peers.get(remote_id)
-        if ctx is not None and ctx.pc.connectionState not in ["failed", "closed"]:
+        if ctx is not None and ctx.pc.connectionState not in [
+            "failed",
+            "closed",
+        ]:
             return True
         return False
 
@@ -872,14 +883,18 @@ class MQTTPublisher:
             logger.debug("[webrtc] %s ~~~ cleanup complete ", remote_id)
 
     async def handle_remote_offer(self, payload: dict, remote_id: str):
+        """Remote offer"""
+
+        logger.debug("")
+
         if not remote_id:
             logger.warning(
-                "[mqtt  ] <%s <<< !!! new stream request - unknown client id",
+                "[mqtt  ] %s <<< !!! STREAM REQUEST - unknown client id",
                 "????????????????",
             )
             return
 
-        logger.debug("[mqtt  ] %s <<< !!! new stream request from client", remote_id)
+        logger.debug("[mqtt  ] %s <<< !!! STREAM REQUEST", remote_id)
 
         if not payload or not isinstance(payload, dict):
             logger.warning(
@@ -905,7 +920,9 @@ class MQTTPublisher:
         @pc.on("track")
         def on_track(track):
             logger.debug(
-                "[webrtc] %s ~~~ webrtc event: track - kind=%s", remote_id, track.kind
+                "[webrtc] %s ~~~ webrtc event: track - kind=%s",
+                remote_id,
+                track.kind,
             )
 
         @pc.on("connectionstatechange")
@@ -959,11 +976,11 @@ class MQTTPublisher:
         # await asyncio.sleep(0.1)
 
         for c in ctx.pending_ice:
-            logger.debug(
-                "[webrtc] %s <<< adding ICE candidate from client %s",
-                self.client_id,
-                remote_id,
-            )
+            # logger.debug(
+            #     "[webrtc] %s <<< adding ICE candidate from client %s",
+            #     self.client_id,
+            #     remote_id,
+            # )
 
             await pc.addIceCandidate(c)
         ctx.pending_ice.clear()
@@ -988,7 +1005,21 @@ class MQTTPublisher:
                 ctx.relay_track = track
 
             logger.debug("[webrtc] %s >>> adding track to peer connection", remote_id)
-            pc.addTrack(track)
+            sender = pc.addTrack(track)
+
+            if args.force_h264:
+                # prefer H.264 by setting codec preferences on the transceiver
+                try:
+                    force_codec(pc, sender, "video/H264")
+                    logger.debug(
+                        "[webrtc] %s - set codec preferences to H.264", remote_id
+                    )
+                except Exception as e:
+                    logger.debug(
+                        "[webrtc] %s - failed to set codec preferences: %s",
+                        remote_id,
+                        e,
+                    )
 
         except Exception as e:
             logger.error(
@@ -1010,13 +1041,16 @@ class MQTTPublisher:
         # send answer to the client
         topic = f"{self.device_id}/sdp/{remote_id}"
         logger.debug(
-            "[mqtt  ] %s >>> sending SDP answer to the client >> %s", remote_id, topic
+            "[mqtt  ] %s >>> sending SDP answer to the client: %s", remote_id, topic
         )
 
         self.publish(
-            topic,
-            {"type": pc.localDescription.type, "sdp": pc.localDescription.sdp},
+            topic, {"type": pc.localDescription.type, "sdp": pc.localDescription.sdp}
         )
+
+    # ---------------------------------------------------------------------
+    # WEBRTC ICE configuration
+    # ---------------------------------------------------------------------
 
     async def handle_remote_ice(self, payload, remote_id: str):
         if (
@@ -1068,11 +1102,11 @@ class MQTTPublisher:
             if ctx.pc.remoteDescription is None:
                 ctx.pending_ice.append(cand)
             else:
-                logger.debug(
-                    "[webrtc] %s <<< adding ICE candidate from client %s",
-                    self.client_id,
-                    remote_id,
-                )
+                # logger.debug(
+                #     "[webrtc] %s <<< adding ICE candidate from client %s",
+                #     self.client_id,
+                #     remote_id,
+                # )
                 await ctx.pc.addIceCandidate(cand)
         except Exception as e:
             logger.debug(
@@ -1081,8 +1115,62 @@ class MQTTPublisher:
                 e,
             )
 
+    # ---------------------------------------------------------------------
+    # MQTT /status message
+    # ---------------------------------------------------------------------
+
+    async def _start_status_task(self):
+        """Start the periodic status publishing task."""
+        if self._status_task is None or self._status_task.done():
+            logger.info(
+                "[mqtt  ] status publishing task started (interval: %ss)",
+                self._status_interval,
+            )
+
+            # publish once
+            await asyncio.sleep(1.5)
+            await self._publish()
+
+            # start task
+            self._status_task = asyncio.create_task(self._publish_status_periodically())
+
+    async def _publish_status_periodically(self):
+        """Publish status message every N seconds."""
+        while not self._closed and not exit_event.is_set():
+            try:
+                await asyncio.sleep(self._status_interval)
+                await self._publish()
+
+            except asyncio.CancelledError:
+                logger.info("[mqtt  ] status publishing task cancelled")
+                break
+            except Exception as e:
+                logger.error(f"[mqtt  ] error in status publishing: {e}")
+                await asyncio.sleep(5)  # Wait before retrying
+
+    async def _publish(self):
+        if self._connected and not self._closed:
+            status_data = {
+                "device_id": self.device_id,
+                "device_type": "camera",
+                "ts": int(time.time()),
+                "status": "alive",
+            }
+
+            # Add camera info if available
+            if self.camera:
+                status_data["camera_ready"] = self.camera._ready.is_set()
+
+            topic = f"device/{self.device_id}/status"
+            self.publish(topic, status_data)
+            logger.debug("[mqtt  ] %s | device status - %s", self.device_id, topic)
+
     def close(self):
         logger.debug("[mqtt  ] %s ~~~ MQTTPublisher close()", self.device_id)
+
+        # Stop status task
+        if self._status_task and not self._status_task.done():
+            self._status_task.cancel()
 
         self.client.disconnect()
         self.client.loop_stop()
@@ -1092,8 +1180,13 @@ class MQTTPublisher:
 async def run_app(args):
     global logger, main_loop, mqtt_pub
 
+    # init logger
     logger = init_log(args.log_level)
+
+    # load configuration
     cfg = load_config(args.config)
+
+    # init main loop
     main_loop = asyncio.get_running_loop()
 
     # Custom exception handler to suppress expected aioice errors during cleanup
@@ -1134,7 +1227,8 @@ async def run_app(args):
             or "TurnClientMixin.send_data" in msg
         ):
             logger.warning(
-                "[turn  ] !!! suppressed TURN channel bind error (%s)", str(exc_str)
+                "[turn  ] !!! suppressed TURN channel bind error (%s)",
+                str(exc_str),
             )
             return
 
@@ -1146,8 +1240,8 @@ async def run_app(args):
 
     main_loop.set_exception_handler(custom_exception_handler)
 
-    mqtt_settings = build_mqtt_settings(cfg, rtsp_url=args.rtsp_url)
-    mqtt_pub = MQTTPublisher(mqtt_settings)
+    # mqtt
+    mqtt_pub = MQTTPublisher(cfg)
     mqtt_pub.connect()
 
     try:
@@ -1192,12 +1286,51 @@ async def run_app(args):
 
 
 if __name__ == "__main__":
-    args = parse_arguments()
+    # arguments
+    parser = argparse.ArgumentParser()
 
+    parser.add_argument(
+        "--config",
+        help="Configuration file (default: /app/rtsp_streamer/conf/config.json)",
+        metavar="[path]",
+    )
+    parser.add_argument("--rtsp-url", help="RTSP url", required=True, metavar="[url]")
+    parser.add_argument(
+        "--status",
+        help="How frequently the script publishes status updates",
+        default=STATUS_INTERVAL,
+        type=int,
+        metavar="[seconds]",
+    )
+    parser.add_argument(
+        "--no-status",
+        help="Disable sending status messages",
+        action="store_true",
+        default=False,
+    )
+    parser.add_argument(
+        "--force-h264",
+        help="Force H264 codec for stream",
+        action="store_true",
+        default=False,
+    )
+
+    parser.add_argument(
+        "--use-relay",
+        help="Use Media Relay",
+        action="store_true",
+        default=False,
+    )
+    parser.add_argument("--log-level", help="Log level", default="info")
+
+    args = parser.parse_args()
+
+    # signals
     signal.signal(signal.SIGINT, handle_signal)
     if sys.platform != "win32":
         signal.signal(signal.SIGTERM, handle_signal)
 
+    # loop
     try:
         asyncio.run(run_app(args))
     except KeyboardInterrupt:

@@ -6,7 +6,6 @@
   "path":"/mqtt",
   "username":"marek",
   "password":"",
-  "client_id":"/usr/bin/cat /proc/cpuinfo | /usr/bin/grep 'Serial' | /usr/bin/xargs | /usr/bin/cut -d ' ' -f 3",
   "fps":15,
   "height":960,
   "width":1280
