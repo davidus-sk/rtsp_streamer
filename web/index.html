@@ -107,6 +107,11 @@
         <h2>Detected Cameras</h2>
         <div id="cameras-display">Loading...</div>
     </div>
+
+    <div id="processes-section">
+        <h2>Streamers</h2>
+        <div id="processes-display">Loading...</div>
+    </div>
 </div>
 
 <center>Copyright &copy; 2026 LUCEON LLC. All rights reserved. <div class="emoji-heart">❤️</sdiv></center>
@@ -115,6 +120,7 @@
     const SUBNET_FILE = 'subnet.json';
     const CAMERAS_FILE = 'cameras.json';
     const LATENCY_FILE = 'latency.json';
+    const PROCESSES_FILE = 'processes.json';
 
     async function loadJson(url) {
         try {
@@ -209,8 +215,43 @@
         container.innerHTML = html;
     }
 
+    async function renderProcesses() {
+        const container = document.getElementById('processes-display');
+        const processes = await loadJson(PROCESSES_FILE);
+
+        if (!processes) {
+            container.innerHTML = `<div class="error">Could not load <strong>${PROCESSES_FILE}</strong>.</div>`;
+            return;
+        }
+        if (processes.length === 0) {
+            container.innerHTML = `<p>No running processes found.</p>`;
+            return;
+        }
+
+        let html = '';
+        Object.entries(processes).forEach(([ip, p]) => {
+
+            // --- START CARD ---
+            html += `<div class="card">`;
+
+            // --- LEFT SIDE: CONTENT ---
+            html += `<div class="card-content">`;
+            html += `<div><strong>PID:</strong> ${p.pid}</div>`;
+            html += `<div><strong>CPU:</strong> ${p.cpu_percent}%</div>`;
+            html += `<div><strong>Memory:</strong> ${p.memory_mb} MB</div>`;
+            html += `<div><strong>Status:</strong> ${p.status}</div>`;
+            html += `<div><strong>Time:</strong> ${p.ts}</div>`;
+            html += `</div>`; // End Left Content
+            html += `</div>`;
+            // --- END CARD ---
+        });
+
+        container.innerHTML = html;
+    }
+
     renderSubnet();
     renderCameras();
+    renderProcesses();
 
 </script>
 

@@ -1,0 +1,13 @@
+{
+  "server":"a90fbb63f52c42cbbe4eb61f7e87346d.s1.eu.hivemq.cloud",
+  "port":"8883",
+  "port_s":"8884",
+  "keepalive":20,
+  "path":"/mqtt",
+  "username":"marek",
+  "password":"",
+  "client_id":"/usr/bin/cat /proc/cpuinfo | /usr/bin/grep 'Serial' | /usr/bin/xargs | /usr/bin/cut -d ' ' -f 3",
+  "fps":15,
+  "height":960,
+  "width":1280
+}

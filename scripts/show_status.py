@@ -1,3 +1,5 @@
+#!/app/penv/bin/python
+
 import time
 import json
 import socket
@@ -7,9 +9,11 @@ from luma.core.interface.serial import i2c
 from luma.core.render import canvas
 from luma.oled.device import ssd1306
 from PIL import ImageFont
+from pathlib import Path
 
 # Configuration
-CAMERAS_FILE = 'cameras.json'
+script_dir = Path(__file__).parent.resolve()
+CAMERAS_FILE = f"{script_dir}/../web/cameras.json"
 UPDATE_INTERVAL = 30  # Seconds
 I2C_PORT = 1
 I2C_ADDRESS = 0x3C    # Standard address for SSD1306
@@ -53,7 +57,7 @@ def main():
 
     # Load a font (Pixel operator is nice, but default bitmap font works if None)
     # To use a custom font: font = ImageFont.truetype("pixel_font.ttf", 10)
-    font = None 
+    font = None
 
     print("Display initialized. Press Ctrl+C to stop.")
 
@@ -72,11 +76,11 @@ def main():
             # 2. Calculate Network Speed (Average over the last interval)
             current_net_bytes = get_network_bytes()
             current_time = time.time()
-            
+
             # Calculate delta
             time_delta = current_time - last_time
             bytes_delta = current_net_bytes - last_net_bytes
-            
+
             # Speed in KB/s
             if time_delta > 0:
                 net_speed = (bytes_delta / time_delta) / 1024 
@@ -96,10 +100,10 @@ def main():
                 draw.text((0, 16), f"CPU: {cpu_pct}%  Mem: {mem_pct}%", fill="white", font=font)
                 
                 # Line 3: Network Speed
-                draw.text((0, 32), f"Net: {net_speed:.1f} KB/s", fill="white", font=font)
+                draw.text((0, 32), f"Net: {net_speed:.1f} KB/s Cams: {cam_count}", fill="white", font=font)
                 
                 # Line 4: Cameras Found
-                draw.text((0, 48), f"Cameras: {cam_count}", fill="white", font=font)
+                draw.text((0, 48), f"Streams: {cam_count}", fill="white", font=font)
 
             # 4. Wait
             time.sleep(UPDATE_INTERVAL)

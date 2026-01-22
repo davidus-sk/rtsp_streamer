@@ -1,0 +1,36 @@
+# python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Environments
+.env
+.venv/
+.venv*/
+env/
+venv/
+venv*/
+ENV/
+
+# NPM packages
+/node_modules
+.env
+package-lock.json
+
+# visual studio code project files
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# php
+composer.phar
+vendor/
+
+conf/config.json
+web/cameras.json
+web/latency.json
+web/processes.json
+web/subnet.json

@@ -201,14 +201,14 @@ def main():
 
         results = scan_subnet(args.subnet, args.port, args.threads)
 
+        # Output solely the JSON array to stdout so it can be piped
+        print(json.dumps(results, indent=4))
+        write_array_to_json_file(results, f"{script_dir}/../web/cameras.json")
+
         elapsed = time.time() - start_time
         sleep_time = max(0, INTERVAL_SECONDS - elapsed)
 
         time.sleep(sleep_time)
-
-    # Output solely the JSON array to stdout so it can be piped
-    print(json.dumps(results, indent=4))
-    write_array_to_json_file(results, f"{script_dir}/../web/cameras.json")
 
 if __name__ == "__main__":
     try:
