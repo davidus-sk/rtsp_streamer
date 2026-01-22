@@ -131,17 +131,40 @@ def main():
 
             # 3. Draw to Screen
             with canvas(device) as draw:
+                draw.line((0, 14, 127, 14), fill="white")
+
                 # Line 1: IP Address
-                draw.text((0, 0),  f"IP: {ip}", fill="white", font=font)
+                draw.rectangle((0, 0, 10, 10), outline="white", fill="white")
+                draw.text((1, 0),  f"IP", fill="black", font=font)
+                draw.text((12, 0),  f"{ip}", fill="white", font=font)
 
                 # Line 2: CPU & Memory
-                draw.text((0, 16), f"CPU: {cpu_pct}%  Mem: {mem_pct}%", fill="white", font=font)
+                draw.rectangle((0, 16, 10, 26), outline="white", fill="white")
+                draw.text((1, 16), "P", fill="black", font=font)
+                draw.text((13, 16), f"{cpu_pct:.1f}%", fill="white", font=font)
+
+                draw.rectangle((69, 16, 79, 26), outline="white", fill="white")
+                draw.text((70, 16), "M", fill="black", font=font)
+                draw.text((82, 16), f"{mem_pct:.1f}%", fill="white", font=font)
 
                 # Line 3: Network Speed
-                draw.text((0, 32), f"Net: {net_speed:.1f} KB/s Cams: {cam_count}", fill="white", font=font)
+                draw.rectangle((0, 32, 10, 42), outline="white", fill="white")
+                draw.text((1, 32), "N", fill="black", font=font)
+                draw.text((13, 32), f"{net_speed/1000:.1f} MB/s" if net_speed > 1000 else f"{net_speed:.1f} KB/s", fill="white", font=font)
+
+                draw.rectangle((69, 32, 79, 42), outline="white", fill="white")
+                draw.text((70, 32), "C", fill="black", font=font)
+                draw.text((82, 32), f"{cam_count} cams", fill="white", font=font)
 
                 # Line 4: Cameras Found
-                draw.text((0, 48), f"Streams: {stream_count}", fill="white", font=font)
+                draw.rectangle((0, 48, 10, 58), outline="white", fill="white")
+                draw.text((1, 48), "S", fill="black", font=font)
+                draw.text((13, 48), f"{stream_count} streams", fill="white", font=font)
+
+                # Line 4: Draw update time
+                draw.rectangle((69, 48, 79, 58), outline="white", fill="white")
+                draw.text((70, 48), "U", fill="black", font=font)
+                draw.text((82, 48), time.strftime("%H:%M:%S"), fill="white", font=font)
 
             # 4. Wait
             time.sleep(UPDATE_INTERVAL)
