@@ -1,4 +1,4 @@
-#!/app/senv/bin/python3
+#!/app/venv/bin/python
 
 # mediamtx
 import argparse
