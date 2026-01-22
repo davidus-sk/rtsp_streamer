@@ -1,0 +1,14 @@
+[Unit]
+Description=Get system info and stats and show it on the attached OLED display.
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/app/rtsp_streamer
+ExecStart=/app/rtsp_streamer/scripts/show_status.py
+Restart=always
+RestartSec=1
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
