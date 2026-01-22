@@ -1,12 +1,23 @@
 {
-  "server":"a90fbb63f52c42cbbe4eb61f7e87346d.s1.eu.hivemq.cloud",
-  "port":"8883",
-  "port_s":"8884",
-  "keepalive":20,
-  "path":"/mqtt",
-  "username":"marek",
-  "password":"",
-  "fps":15,
-  "height":960,
-  "width":1280
+    "server":"a90fbb63f52c42cbbe4eb61f7e87346d.s1.eu.hivemq.cloud",
+    "port":"8883",
+    "port_s":"8884",
+    "keepalive":20,
+    "path":"/mqtt",
+    "username":"marek",
+    "password":"",
+    "fps":15,
+    "height":960,
+    "width":1280,
+    "ice_servers": [
+        {
+            "urls": ["stun:34.200.4.20:3478"]
+        },
+        {
+            "urls": ["turn:34.200.4.20:3478"],
+            "username": "marek",
+            "credential": "",
+            "credentialType": "password"
+        }
+    ]
 }
