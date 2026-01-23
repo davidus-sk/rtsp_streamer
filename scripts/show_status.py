@@ -7,6 +7,8 @@ import json
 import socket
 import os
 import psutil
+import random
+import RPi.GPIO as GPIO
 from luma.core.interface.serial import i2c
 from luma.core.render import canvas
 from luma.oled.device import ssd1306
@@ -69,7 +71,7 @@ def animate_luceon():
     # We need to measure widths to center the whole word
     total_width = 0
     letter_data = []
-    
+
     # Calculate widths using font.getbbox (PIL 8.0+) or getsize (older PIL)
     for char in TEXT:
         if hasattr(font, "getbbox"):
@@ -78,33 +80,33 @@ def animate_luceon():
             h = bbox[3] - bbox[1]
         else:
             w, h = font.getsize(char)
-        
+
         letter_data.append({"char": char, "w": w, "h": h})
         total_width += w
 
     # Calculate starting X to center the text
     start_x = (WIDTH - total_width) // 2
     current_x = start_x
-    
+
     # Assign target (final) coordinates for each letter
     target_y = (HEIGHT - FONT_SIZE) // 2
-    
+
     for letter in letter_data:
         letter["target_x"] = current_x
         letter["target_y"] = target_y
         letter["start_y"] = -40  # Start well above the screen
-        
+
         # Add a slight delay offset so they don't fall all at once (staggered)
         # We'll handle this in the loop
         current_x += letter["w"]
 
     # --- Animation Loop ---
     start_time = time.time()
-    
+
     while True:
         now = time.time()
         elapsed = now - start_time
-        
+
         # Determine progress (0.0 to 1.0)
         # If elapsed > DURATION, we clamp it to 1.0 to finish cleanly
         if elapsed > DURATION:
@@ -115,32 +117,32 @@ def animate_luceon():
         with canvas(device) as draw:
             for i, letter in enumerate(letter_data):
                 # STAGGER LOGIC:
-                # We skew the time for each letter. 
+                # We skew the time for each letter.
                 # Letter 0 starts at t=0, Letter 1 starts at t=0.1, etc.
                 letter_delay = i * 0.1
-                
+
                 # Normalize time for THIS specific letter
                 # We scale it so the letter finishes its animation within the global duration
                 letter_progress = (elapsed - letter_delay) / (DURATION * 0.6)
-                
+
                 # Clamp between 0 and 1
                 letter_progress = max(0.0, min(1.0, letter_progress))
 
                 # Apply Bounce Easing
                 bounce_value = ease_out_bounce(letter_progress)
-                
+
                 # Interpolate Y Position
                 # y = start + (distance * bounce_value)
                 dist = letter["target_y"] - letter["start_y"]
                 current_y = letter["start_y"] + (dist * bounce_value)
-                
+
                 # Draw
                 draw.text((letter["target_x"], int(current_y)), letter["char"], font=font, fill="white")
 
         # Break loop when animation is totally done
         if elapsed > DURATION + 0.5:
             break
-            
+
         # Small sleep to yield CPU
         time.sleep(0.01)
 
@@ -152,8 +154,30 @@ def signal_handler(signum, frame):
     Handle the received signal.
     """
 
+    GPIO.cleanup()
     device.clear()
     sys.exit(0)
+
+def is_gpio15_low():
+    """
+    Checks if GPIO 15 is currently pulled LOW (connected to Ground).
+    Returns: True if LOW, False if HIGH.
+    """
+    # Set the pin numbering mode to BCM (Broadcom)
+    # This refers to the GPIO number (15), not the physical pin number.
+    GPIO.setmode(GPIO.BCM)
+
+    # Setup GPIO 15 as Input
+    # pull_up_down=GPIO.PUD_UP enables the internal pull-up resistor.
+    # This forces the pin to be HIGH (1) unless actively connected to GND.
+    GPIO.setup(15, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+
+    # Read the pin.
+    # GPIO.LOW (0) means it is connected to Ground.
+    if GPIO.input(15) == GPIO.LOW:
+        return True
+    else:
+        return False
 
 def get_ip_address():
     """
@@ -243,9 +267,23 @@ def main():
     # Initialize network counters for speed calculation
     last_net_bytes = get_network_bytes()
     last_time = time.time()
+    last_show_time = time.time()
 
     try:
         while True:
+            # Put to sleep after timeout
+            if (time.time() - last_show_time) > 60:
+                device.clear()
+
+                if is_gpio15_low():
+                    last_net_bytes = get_network_bytes()
+                    last_time = time.time()
+                    last_show_time = time.time()
+
+                time.sleep(0.25)
+
+                continue
+
             # 1. Gather System Stats
             ip = get_ip_address()
             cpu_pct = psutil.cpu_percent(interval=None)
@@ -313,6 +351,7 @@ def main():
 
     except KeyboardInterrupt:
         # Clear screen on exit
+        GPIO.cleanup()
         device.clear()
         print("Display stopped.")
 
