@@ -102,6 +102,19 @@ def main():
                 proc = info['process']
                 url = info['url']
 
+                # Check if IP has changed
+                cameras = load_cameras()
+                camera_found = False
+
+                if cameras:
+                    for cam in cameras:
+                        if ip == cam['ip']:
+                            camera_found = True
+
+                if not camera_found:
+                    print(f"[manager] ALERT: Worker for {ip} needs new address. Restarting...")
+                    proc.kill()
+
                 # --- HEALTH CHECK ---
                 exit_code = proc.poll()
 
