@@ -75,10 +75,15 @@ def main():
     print(f"--- Process Manager Started. Monitoring {CAMERAS_FILE} ---")
 
     # 1. Initial Start
-    cameras = load_cameras()
-    if not cameras:
-        print("No valid cameras found to start.")
-        return
+    while True:
+        cameras = load_cameras()
+
+        if not cameras:
+            print("No valid cameras found to start.")
+        else:
+            break
+
+        time.sleep(1)
 
     for cam in cameras:
         ip = cam['ip']
