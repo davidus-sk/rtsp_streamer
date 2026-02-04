@@ -72,10 +72,9 @@ def init_log(log_level: str | None = None) -> logging.Logger:
 
     log_level = log_level.lower() if log_level is not None else None
     if log_level is not None and log_level not in choices:
-        msg = (
+        print(
             f"ERROR: Invalid log level. Available options: {', '.join(choices.keys())}"
         )
-        print(msg)
         sys.exit(1)
 
     if log_level is None:
@@ -151,6 +150,9 @@ def load_config(config_path: str | None = None):
 
             config = yaml.safe_load(file)
             config_loaded = True
+    else:
+        shutil.copyfile(config_path_default, config_path)
+        config_loaded = True
 
     if not config_loaded:
         raise Exception(f"Config file {config_path} not exists or is not readable.")
