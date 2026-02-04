@@ -1,0 +1,33 @@
+# mqtt
+mqtt:
+  # the hostname or IP address of the remote broker.
+  host: 2c843f82e5314984954de770e782a2ff.s1.eu.hivemq.cloud
+  # the network port of the server host to connect to. Defaults to 1883.
+  port: 8884
+  # client keepalive interval (in seconds)
+  keepalive: 20
+  # use "websockets" to use WebSockets as the transport mechanism.
+  # Set to "tcp" to use raw TCP, which is the default.
+  # Use "unix" to use Unix sockets as the transport mechanism; note that this option
+  # is only available on platforms that support Unix sockets, and the "host" argument is
+  # interpreted as the path to the Unix socket file in this case.
+  transport: "websockets"
+  # a string starting with / which should be the endpoint of the mqtt connection on the remote server
+  ws_path: /mqtt
+  # the username used to connect to the MQTT broker
+  username:
+  # the password used to connect to the MQTT broker
+  password:
+  # allows explicit setting of the MQTT version to use for this client
+  protocol: 5
+  ice_servers:
+    - urls: "stun:34.200.4.20:3478"
+    - urls: "turn:34.200.4.20:3478"
+      username: marek
+      credential: 337caaf1d2
+
+# camera
+camera:
+  fps: 15
+  height: 960
+  width: 1280

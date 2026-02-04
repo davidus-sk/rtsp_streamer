@@ -29,7 +29,6 @@ package-lock.json
 composer.phar
 vendor/
 
-conf/config.json
 web/cameras.json
 web/latency.json
 web/processes.json

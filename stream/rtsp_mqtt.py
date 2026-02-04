@@ -8,9 +8,9 @@ import gc
 import hashlib
 import json
 import logging
-import os
 import random
 import re
+import shutil
 import signal
 import string
 import sys
@@ -18,10 +18,12 @@ import threading
 import time
 import traceback
 import weakref
+from os import path
 from typing import Any, Optional
 
 # from aiohttp import web
 import paho.mqtt.client as paho
+import yaml
 from aiortc import (
     MediaStreamError,
     RTCConfiguration,
@@ -34,6 +36,8 @@ from aiortc import (
 from aiortc.contrib.media import MediaPlayer, MediaRelay
 from aiortc.sdp import candidate_from_sdp
 from av import VideoFrame
+
+APP_DIR = path.abspath(path.dirname(path.dirname(__file__)))
 
 # david cam1
 # rtsp://192.168.137.164/axis-media/media.amp
@@ -100,33 +104,74 @@ def init_log(log_level: str | None = None) -> logging.Logger:
     return logger
 
 
-def load_config(path: str | None = None):
+def load_config(config_path: str | None = None):
     """
-    Load configuration from JSON file.
+    nacitaj hodnoty z configu
 
-    Args:
-        path: Path to the JSON configuration file
-
-    Returns:
-        dict: Configuration dictionary containing MQTT settings, ICE servers, and stream parameters
+    Raises:
+        ValueError: nespravna hodnota v configu
     """
 
-    if path is None:
-        # default config path
-        path = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "..", "conf") + "/config.json"
-        )
+    config = {}
+    default_config = {}
+    config_path = config_path.strip() if config_path is not None else None
 
-    try:
-        with open(path, "r") as f:
-            cfg = json.load(f)
-    except FileNotFoundError:
-        logger.error(f"[config] Config file not found at {path}. Exiting.")
-        sys.exit(100)
-    except Exception as e:
-        logger.error(f"[config] {e}")
-        sys.exit(101)
-    return cfg
+    if not config_path:
+        config_path = "config.yaml"
+    else:
+        if not config_path.endswith(".yaml"):
+            config_path += ".yaml"
+
+    # load the user-provided config
+    if not path.isabs(config_path):
+        base_name = path.basename(config_path)
+        config_path = path.abspath(f"{APP_DIR}/config/{base_name}")
+
+    # default config path
+    config_path_default = path.abspath(f"{APP_DIR}/config/config.default.yaml")
+
+    # load the default config
+    config_loaded = False
+
+    if path.isfile(config_path_default):
+        with open(config_path_default, "r") as file:
+            if not file or file == "":
+                raise Exception(f"Config file {config_path_default} is empty.")
+
+            default_config = yaml.safe_load(file)
+            config_loaded = True
+
+        if not path.isfile(config_path):
+            shutil.copy(config_path_default, config_path)
+
+    if path.isfile(config_path):
+        with open(config_path, "r") as file:
+            if not file or file == "":
+                raise Exception(f"Config file {config_path} is empty.")
+
+            config = yaml.safe_load(file)
+            config_loaded = True
+
+    if not config_loaded:
+        raise Exception(f"Config file {config_path} not exists or is not readable.")
+
+    # merge configs
+    config = merge_dicts(default_config, config)
+
+    return config
+
+
+def merge_dicts(default, config):
+    """Recursively merges two dictionaries."""
+    if not isinstance(config, dict):
+        config = {}
+
+    for key, value in config.items():
+        if isinstance(value, dict) and key in default:
+            default[key] = merge_dicts(default.get(key, {}), value)
+        else:
+            default[key] = value
+    return default
 
 
 def random_hex_string(length: int = 16):
@@ -135,43 +180,72 @@ def random_hex_string(length: int = 16):
 
 
 def build_mqtt_settings(cfg, rtsp_url: str) -> dict:
-    for k in ("server", "port", "port_s", "username"):
-        if k not in cfg:
-            logger.error(f"[config]: Missing key '{k}' in config file.")
-            sys.exit(102)
 
-    mqtt_broker = cfg.get("server")
+    # configuration
+    if not isinstance(cfg, dict):
+        logger.error("[config]: Invalid configuration.")
+        sys.exit(1)
 
+    # mqtt configuration
+    if "mqtt" not in cfg or not isinstance(cfg, dict):
+        logger.error(
+            "[config]: Invalid MQTT configuration. Please check configuration file."
+        )
+        sys.exit(1)
+
+    mqtt_cfg = cfg["mqtt"]
+
+    for k in ("host", "port", "username"):
+        if k not in mqtt_cfg:
+            logger.error(f"[config]: Missing key 'mqtt.{k}' in config file.")
+            sys.exit(1)
+
+    # host
+    broker = mqtt_cfg.get("host")
+
+    # port
     try:
-        mqtt_port = int(cfg.get("port_s"))
+        port = int(mqtt_cfg.get("port"))
     except Exception:
-        logger.error("[config]: Invalid port_s value in config, must be int.")
-        sys.exit(103)
+        logger.error("[config]: Invalid 'mqtt.port' value in config, must be int.")
+        sys.exit(1)
 
-    mqtt_username = cfg.get("username")
-    mqtt_password = cfg.get("password", "")
-    mqtt_keepalive = int(cfg.get("keepalive", 20))
-    mqtt_ws_path = cfg.get("path", "/mqtt")
-    mqtt_use_ws = True
-    mqtt_protocol = paho.MQTTv5
+    transport = mqtt_cfg.get("transport", "tcp")
+    username = mqtt_cfg.get("username")
+    password = mqtt_cfg.get("password", "")
+    ws_path = mqtt_cfg.get("ws_path", "/mqtt")
+
+    # protocol version
+    try:
+        keepalive = int(mqtt_cfg.get("keepalive", 20))
+    except Exception:
+        logger.error("[config]: Invalid 'mqtt.keepalive' value in config, must be int.")
+        sys.exit(1)
+
+    # protocol version
+    try:
+        protocol = int(mqtt_cfg.get("protocol", paho.MQTTv5))
+    except Exception:
+        logger.error("[config]: Invalid 'mqtt.protocol' value in config, must be int.")
+        sys.exit(1)
 
     md5 = hashlib.md5(rtsp_url.encode("utf-8")).hexdigest()[:16]
     client_id = md5
     device_id = md5
 
     if not device_id:
-        logger.error("[config]: Could not determine 'client_id', exiting.")
+        logger.error("[config]: Could not determine 'mqtt.client_id', exiting.")
         sys.exit(104)
 
     return dict(
-        broker=mqtt_broker,
-        port=mqtt_port,
-        username=mqtt_username,
-        password=mqtt_password,
-        keepalive=mqtt_keepalive,
-        ws_path=mqtt_ws_path,
-        use_ws=mqtt_use_ws,
-        protocol=mqtt_protocol,
+        broker=broker,
+        port=port,
+        username=username,
+        password=password,
+        keepalive=keepalive,
+        ws_path=ws_path,
+        protocol=protocol,
+        transport=transport,
         client_id=client_id,
         device_id=device_id,
     )
@@ -189,15 +263,15 @@ def build_ice_servers(cfg: dict) -> list:
 
     if "ice_servers" in cfg and isinstance(cfg["ice_servers"], list):
         if len(cfg["ice_servers"]):
-            for server_config in cfg["ice_servers"]:
-                if "urls" not in server_config:
+            for _server in cfg["ice_servers"]:
+                if "urls" not in _server:
                     logger.warning("[webrtc] ICE server entry missing 'urls', skipping")
                     continue
 
-                urls = server_config["urls"]
-                username = server_config.get("username")
-                credential = server_config.get("credential")
-                credential_type = server_config.get("credentialType", "password")
+                urls = _server["urls"]
+                username = _server.get("username")
+                credential = _server.get("credential")
+                credential_type = _server.get("credentialType", "password")
 
                 try:
                     # Build kwargs conditionally based on whether auth is provided
@@ -389,23 +463,23 @@ class SharedRTSPPlayer:
                     self.rtsp_url,
                     format="rtsp",
                     options={
-                        #"video_size": "1024x768",
+                        # "video_size": "1024x768",
                         "rtsp_transport": "tcp",
-                        #"rtsp_flags": "prefer_tcp",
+                        # "rtsp_flags": "prefer_tcp",
                         "fflags": "nobuffer+flush_packets",
                         "flags": "low_delay",
                         "max_delay": "0",
                         "buffer_size": "1024000",
                         "timeout": "5000000",
                         "reorder_queue_size": "0",
-                        #"framerate": "20", # Set the target FPS (e.g., 60)
-                        "probesize": "32", # Reduce initial analysis time
-                        "analyzeduration": "0", # Start stream immediately
-                        "preset": "ultrafast", # Test
-                        #"tune": "zerolatency", # Test
-                        "vn": "0", # video enabled
-                        "an": "1", # audio disabled
-                    }
+                        # "framerate": "20", # Set the target FPS (e.g., 60)
+                        "probesize": "32",  # Reduce initial analysis time
+                        "analyzeduration": "0",  # Start stream immediately
+                        "preset": "ultrafast",  # Test
+                        # "tune": "zerolatency", # Test
+                        "vn": "0",  # video enabled
+                        "an": "1",  # audio disabled
+                    },
                 )
             else:
                 logger.info(
@@ -649,8 +723,8 @@ class SharedRTSPPlayer:
 
 
 class MQTTPublisher:
-    SDP_OFFER_PATTERN = re.compile(r"(device-)?[0-9a-fA-F]{16}/sdp/([^/]+)/offer")
-    ICE_OFFER_PATTERN = re.compile(r"(device-)?[0-9a-fA-F]{16}/ice/([^/]+)/offer")
+    SDP_OFFER_PATTERN = re.compile(r"([0-9a-zA-Z\-\_]+)/sdp/([^/]+)/offer")
+    ICE_OFFER_PATTERN = re.compile(r"([0-9a-zA-Z\-\_]+)/ice/([^/]+)/offer")
 
     def __init__(self, cfg: dict):
         """Init"""
@@ -672,6 +746,7 @@ class MQTTPublisher:
 
         logger.info(f"[mqtt  ] CLIENT_ID: {self.client_id}")
         logger.info(f"[mqtt  ] DEVICE_ID: {self.device_id}")
+        logger.info(f"[mqtt  ] MQTT BROKER: {self.settings['broker']}")
 
         self.camera = None
 
@@ -684,7 +759,7 @@ class MQTTPublisher:
             callback_api_version=paho.CallbackAPIVersion.VERSION2,  # type: ignore
             client_id=self.settings["client_id"],
             protocol=self.settings["protocol"],
-            transport="websockets" if self.settings["use_ws"] else "tcp",
+            transport=self.settings["transport"],
         )
 
         if self.settings["username"]:
@@ -693,7 +768,7 @@ class MQTTPublisher:
                 self.settings["password"],
             )
 
-        if self.settings["use_ws"]:
+        if self.settings["transport"] == "websockets":
             self.client.tls_set()
             self.client.ws_set_options(path=self.settings["ws_path"])
 
@@ -702,7 +777,7 @@ class MQTTPublisher:
         self.client.on_message = self._on_message
 
         # Build ICE servers from config
-        ice_servers = build_ice_servers(cfg)
+        ice_servers = build_ice_servers(cfg["mqtt"])
         self.webrtc_config = RTCConfiguration(
             iceServers=ice_servers,
         )
@@ -730,7 +805,7 @@ class MQTTPublisher:
         ice_match = self.ICE_OFFER_PATTERN.match(msg.topic)
 
         if sdp_match:
-            remote_id = sdp_match.group(2)
+            remote_id = sdp_match.group(2)  # group(1) is local client id
             payload = json.loads(msg.payload)
 
             if main_loop is None:
@@ -741,7 +816,9 @@ class MQTTPublisher:
                 )
 
         elif ice_match:
-            remote_id = ice_match.group(2)
+            remote_id = ice_match.group(
+                2
+            )  # group(1) is local client id# group(1) is local client id
             payload = json.loads(msg.payload)
 
             if main_loop is None:
@@ -893,12 +970,12 @@ class MQTTPublisher:
 
         if not remote_id:
             logger.warning(
-                "[mqtt  ] %s <<< !!! STREAM REQUEST - unknown client id",
+                "[mqtt  ] %s !!! STREAM REQUEST - unknown client id",
                 "????????????????",
             )
             return
 
-        logger.debug("[mqtt  ] %s <<< !!! STREAM REQUEST", remote_id)
+        logger.debug("[mqtt  ] %s !!! STREAM REQUEST", remote_id)
 
         if not payload or not isinstance(payload, dict):
             logger.warning(
@@ -1340,5 +1417,4 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         exit_event.set()
     except Exception:
-        print("exception >>>>")
         print(traceback.format_exc())
