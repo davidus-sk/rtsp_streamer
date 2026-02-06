@@ -181,7 +181,10 @@ def random_hex_string(length: int = 16):
     return "".join(random.choice(hex_chars) for _ in range(length))
 
 
-def build_mqtt_settings(cfg, rtsp_url: str) -> dict:
+def build_mqtt_settings(cfg, rtsp_url: str, client_id: str | None = None) -> dict:
+    """
+    Build MQTT configuration
+    """
 
     # configuration
     if not isinstance(cfg, dict):
@@ -232,11 +235,10 @@ def build_mqtt_settings(cfg, rtsp_url: str) -> dict:
         sys.exit(1)
 
     md5 = hashlib.md5(rtsp_url.encode("utf-8")).hexdigest()[:16]
-    client_id = md5
-    device_id = md5
+    client_id = client_id if client_id and len(client_id) else md5
 
-    if not device_id:
-        logger.error("[config]: Could not determine 'mqtt.client_id', exiting.")
+    if not client_id:
+        logger.error("[config]: Unknown Mqtt Client id. Exiting.")
         sys.exit(104)
 
     return dict(
@@ -249,7 +251,7 @@ def build_mqtt_settings(cfg, rtsp_url: str) -> dict:
         protocol=protocol,
         transport=transport,
         client_id=client_id,
-        device_id=device_id,
+        device_id=client_id,
     )
 
 
@@ -772,7 +774,12 @@ class MQTTPublisher:
         """Init"""
 
         self.config = cfg
-        self.settings = build_mqtt_settings(cfg, rtsp_url=args.rtsp_url)
+        self.settings = build_mqtt_settings(
+            cfg,
+            rtsp_url=args.rtsp_url,
+            client_id=args.client_id,
+        )
+
         self.peers = {}
 
         # Lock to prevent race conditions during cleanup
@@ -1436,6 +1443,7 @@ if __name__ == "__main__":
         metavar="[path]",
     )
     parser.add_argument("--rtsp-url", help="RTSP url", required=True, metavar="[url]")
+    parser.add_argument("--client-id", help="Mqtt client id")
     parser.add_argument(
         "--status",
         help="How frequently the script publishes status updates",
