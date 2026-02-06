@@ -16,6 +16,8 @@
             .container {
                 max-width: 900px;
                 margin: 0 auto;
+            }
+            .wrapper {
                 background: white;
                 padding: 30px;
                 border-radius: 8px;
@@ -34,7 +36,7 @@
 
             .text-center {
                 font-size: 0.8rem;
-                margin-top: 10px;
+                margin-top: 15px;
                 color: #aaa;
                 text-align: center;
             }
@@ -43,7 +45,7 @@
                 display: block;
                 margin-left: auto;
                 margin-right: auto;
-                width: /* specify a width smaller than the container */;
+                width: 300px;
             }
 
             /* --- CARD LAYOUT UPDATES --- */
@@ -138,26 +140,28 @@
     </head>
     <body>
         <div class="container">
-            <div class="logo"><img src="logo.png" width="300" /></div>
+            <div class="wrapper">
+                <div class="logo"><img src="logo.png" width="300" /></div>
 
-            <h1>Streamer Dashboard</h1>
+                <h1>Streamer Dashboard</h1>
 
-            <div id="subnet-section">
-                <h2>Network Configuration</h2>
-                <div id="subnet-display">Loading...</div>
+                <div id="subnet-section">
+                    <h2>Network Configuration</h2>
+                    <div id="subnet-display">Loading...</div>
+                </div>
+
+                <div id="cameras-section">
+                    <h2>Detected Cameras</h2>
+                    <div id="cameras-display">Loading...</div>
+                </div>
+
+                <div id="processes-section">
+                    <h2>Streamers</h2>
+                    <div id="processes-display">Loading...</div>
+                </div>
             </div>
 
-            <div id="cameras-section">
-                <h2>Detected Cameras</h2>
-                <div id="cameras-display">Loading...</div>
-            </div>
-
-            <div id="processes-section">
-                <h2>Streamers</h2>
-                <div id="processes-display">Loading...</div>
-            </div>
-
-            <div class="text-center">
+            <div class="footer">
                 Copyright &copy; 2026 LUCEON LLC. All rights reserved.
                 <div class="emoji-heart">❤️</div>
             </div>
