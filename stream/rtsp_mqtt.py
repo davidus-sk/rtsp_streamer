@@ -36,6 +36,7 @@ from aiortc import (
 from aiortc.contrib.media import MediaPlayer, MediaRelay
 from aiortc.sdp import candidate_from_sdp
 from av import VideoFrame
+from av.error import HTTPForbiddenError
 
 APP_DIR = path.abspath(path.dirname(path.dirname(__file__)))
 
@@ -492,11 +493,7 @@ class SharedRTSPPlayer:
 
         try:
             if is_v4l2_device:
-                logger.info(
-                    "[cam   ] %s ~~~  ^ using v4l2 device: %s",
-                    self.device_id,
-                    self.rtsp_url,
-                )
+                logger.info("[cam   ]     ^ using v4l2 device")
                 self.player = MediaPlayer(
                     self.rtsp_url,
                     format="v4l2",
@@ -506,29 +503,26 @@ class SharedRTSPPlayer:
                     },
                 )
             elif is_rtsp:
-                logger.info("[cam   ] ~~~ ^ using RTSP stream")
+                logger.info("[cam   ]     ^ using RTSP stream")
                 self.player = MediaPlayer(
                     self.rtsp_url,
-                    # format="rtsp",
+                    format="rtsp",
                     options={
                         # "video_size": str(resolution),
                         "rtsp_transport": "tcp",
-                        # # "rtsp_flags": "prefer_tcp",
-                        # "fflags": "nobuffer+flush_packets",
+                        "rtsp_flags": "prefer_tcp",
+                        "fflags": "nobuffer+flush_packets",
                         "threads": "1",
-                        # "flags": "low_delay",
+                        "flags": "low_delay",
                         # "max_delay": "0",
-                        # "buffer_size": "1024000",
-                        # "timeout": "5000000",
-                        # "reorder_queue_size": "0",
-                        # "framerate": str(self.fps),  # Set the target FPS (e.g., 60)
-                        # "probesize": "32",  # Reduce initial analysis time
-                        # "analyzeduration": "0",  # Start stream immediately
+                        "buffer_size": "1024000",
+                        "reorder_queue_size": "0",
+                        "probesize": "32",  # Reduce initial analysis time
+                        "analyzeduration": "0",  # Start stream immediately
                         # "preset": "ultrafast",  # Test
                         # # "tune": "zerolatency", # Test
-                        # "vn": "0",  # video enabled
-                        # "an": "1",  # audio disabled
                     },
+                    timeout=10,
                 )
             else:
                 logger.info("[cam   ] ~~~ ^ auto-detecting source format")
@@ -537,11 +531,11 @@ class SharedRTSPPlayer:
             if not self.player or not self.player.video:
                 raise RuntimeError("Failed to create player with video track")
 
-        except Exception as e:
-            logger.error(
-                "[cam   ] !!! failed to create MediaPlayer: %s",
-                str(e),
-            )
+        except HTTPForbiddenError as err:
+            logger.error("[cam   ]     ^ !!! %s", str(err))
+            raise
+        except Exception as err:
+            logger.error("[cam   ]     ^ !!! %s", str(err))
             raise
 
         # Wrap recv to track frame timing and health
@@ -699,7 +693,15 @@ class SharedRTSPPlayer:
             )
 
             if self._active_clients == 1:
-                await self._start_locked()
+                try:
+                    await self._start_locked()
+                except Exception:
+                    # Rollback client count if stream fails to start
+                    self._active_clients -= 1
+                    logger.error(
+                        f"[cam   ] {remote_id} !!! failed to start stream, client removed (active: {self._active_clients})"
+                    )
+                    raise
 
     async def remove_client(self, remote_id: str):
         """
@@ -1027,6 +1029,14 @@ class MQTTPublisher:
 
         logger.debug("[mqtt  ] %s !!! STREAM REQUESTED", remote_id)
 
+        # Reject new connections if shutting down
+        if exit_event.is_set():
+            logger.warning(
+                "[mqtt  ] %s !!! rejecting connection - system is shutting down",
+                remote_id,
+            )
+            return
+
         if not payload or not isinstance(payload, dict):
             logger.warning(
                 "[mqtt  ] %s <<< !!! received invalid SDP offer from client",
@@ -1154,15 +1164,24 @@ class MQTTPublisher:
                         e,
                     )
 
-        except Exception as e:
+        except Exception as err:
             logger.error(
-                "[webrtc] %s >>> exception during track setup: %s", remote_id, str(e)
+                "[webrtc] %s >>> exception during track setup: %s", remote_id, str(err)
             )
-            logger.error(
-                "[webrtc] %s >>> exception traceback: %s",
-                remote_id,
-                traceback.format_exc(),
-            )
+
+            # Clean up the peer connection
+            await pc.close()
+
+            # Trigger application shutdown on stream failure
+            logger.error("[main  ] stream connection failed, triggering shutdown...")
+            exit_event.set()
+
+            # Close MQTT connection immediately to stop accepting new connections
+            if self._connected and not self._closed:
+                logger.info("[mqtt  ] disconnecting from MQTT broker...")
+                self.close()
+
+            return
 
         # create and set local answer
         logger.debug("[webrtc] %s >>> createAnswer()", remote_id)
