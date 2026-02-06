@@ -1,259 +1,302 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Luceon RTSP Streamer</title>
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f4f4f9; padding: 20px; color: #333; }
-        .container { max-width: 900px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-        h1 { border-bottom: 2px solid #eee; padding-bottom: 10px; margin-bottom: 20px; }
-        h2 { font-size: 1.2rem; margin-top: 30px; color: #555; }
-        center { font-size: 0.8rem; margin-top: 10px; color: #aaa; }
-
-        .logo img {
-           display: block;
-           margin-left: auto;
-           margin-right: auto;
-           width: /* specify a width smaller than the container */;
-         }
-        
-        /* --- CARD LAYOUT UPDATES --- */
-        .card { 
-            display: flex;               /* Enable Flexbox */
-            justify-content: space-between; /* Space between text and image */
-            align-items: flex-start;     /* Align items to the top */
-            border: 1px solid #ddd; 
-            background: #fafafa; 
-            border-radius: 6px; 
-            padding: 15px; 
-            margin-bottom: 15px; 
-        }
-
-        .card-content {
-            flex: 1;                     /* Takes up all available space on the left */
-            padding-right: 20px;         /* Buffer between text and image */
-        }
-
-        .card-thumbnail {
-            width: 160px;                /* Fixed width for thumbnail */
-            height: 100px;               /* Fixed height */
-            background: #e0e0e0;         /* Placeholder background */
-            border-radius: 4px;
-            object-fit: cover;           /* Ensures image covers the box without stretching */
-            flex-shrink: 0;              /* Prevents image from shrinking on small screens */
-            border: 1px solid #ccc;
-            
-            /* Center text for the placeholder */
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #777;
-            font-size: 0.8rem;
-            text-align: center;
-        }
-        
-        .card strong { color: #0056b3; }
-        .error { color: #d9534f; background: #fdf7f7; padding: 10px; border: 1px solid #d9534f; border-radius: 4px; }
-        .badge { display: inline-block; padding: 2px 6px; font-size: 0.8rem; border-radius: 4px; color: white; background: #6c757d; }
-        .badge-success { background: #28a745; }
-
-        .emoji-heart {
-            cursor: default;
-            
-            /* The Animation Configuration */
-            animation-name: emoji-pulse;
-            animation-duration: 1.2s;
-            animation-timing-function: ease-in-out;
-            animation-iteration-count: infinite;
-        }
-
-        /* The Animation Keyframes */
-        @keyframes emoji-pulse {
-            0% {
-                transform: scale(1);
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Luceon RTSP Streamer</title>
+        <style>
+            body {
+                font-family:
+                    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial,
+                    sans-serif;
+                background-color: #f4f4f9;
+                padding: 20px;
+                color: #333;
             }
-            15% {
-                transform: scale(1.2); /* Grow quickly */
+            .container {
+                max-width: 900px;
+                margin: 0 auto;
+                background: white;
+                padding: 30px;
+                border-radius: 8px;
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
             }
-            30% {
-                transform: scale(1);   /* Shrink back */
+            h1 {
+                border-bottom: 2px solid #eee;
+                padding-bottom: 10px;
+                margin-bottom: 20px;
             }
-            45% {
-                transform: scale(1.15); /* Grow slightly less */
-            }
-            60% {
-                transform: scale(1);   /* Rest */
-            }
-            100% {
-                transform: scale(1);   /* Wait */
-            }
-        }
-    </style>
-</head>
-<body>
-
-<div class="container">
-    <div class="logo"><img src="logo.png" width="300" /></div>
-
-    <h1>Streamer Dashboard</h1>
-
-    <div id="subnet-section">
-        <h2>Network Configuration</h2>
-        <div id="subnet-display">Loading...</div>
-    </div>
-
-    <div id="cameras-section">
-        <h2>Detected Cameras</h2>
-        <div id="cameras-display">Loading...</div>
-    </div>
-
-    <div id="processes-section">
-        <h2>Streamers</h2>
-        <div id="processes-display">Loading...</div>
-    </div>
-</div>
-
-<center>Copyright &copy; 2026 LUCEON LLC. All rights reserved. <div class="emoji-heart">❤️</sdiv></center>
-
-<script>
-    const SUBNET_FILE = 'subnet.json';
-    const CAMERAS_FILE = 'cameras.json';
-    const LATENCY_FILE = 'latency.json';
-    const PROCESSES_FILE = 'processes.json';
-
-    async function loadJson(url) {
-        try {
-            const response = await fetch(url);
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            return await response.json();
-        } catch (error) {
-            console.error("Fetch Error:", error);
-            return null; 
-        }
-    }
-
-    async function renderSubnet() {
-        const container = document.getElementById('subnet-display');
-        const data = await loadJson(SUBNET_FILE);
-
-        if (!data) {
-            container.innerHTML = `<div class="error">Could not load <strong>${SUBNET_FILE}</strong>.</div>`;
-            return;
-        }
-
-        let html = `<div class="card"><div class="card-content">`;
-        if (Array.isArray(data)) {
-            html += `<strong>Subnet List:</strong> ${data.join(', ')}`;
-        } else if (typeof data === 'object') {
-            for (const [key, value] of Object.entries(data)) {
-                html += `<div><strong>${key}:</strong> ${value}</div>`;
-            }
-        } else {
-            html += `<strong>Value:</strong> ${data}`;
-        }
-        html += `</div></div>`;
-        container.innerHTML = html;
-    }
-
-    async function renderCameras() {
-        const container = document.getElementById('cameras-display');
-        const cameras = await loadJson(CAMERAS_FILE);
-        const latency = await loadJson(LATENCY_FILE);
-
-        if (!cameras) {
-            container.innerHTML = `<div class="error">Could not load <strong>${CAMERAS_FILE}</strong>.</div>`;
-            return;
-        }
-        if (cameras.length === 0) {
-            container.innerHTML = `<p>No cameras found in scan.</p>`;
-            return;
-        }
-
-        let html = '';
-        cameras.forEach(cam => {
-            const hasStream = cam.stream_uri && !cam.error;
-            const latencyObj = latency[cam.ip];
-            
-            // --- START CARD ---
-            html += `<div class="card">`;
-            
-            // --- LEFT SIDE: CONTENT ---
-            html += `<div class="card-content">`;
-            html += `<div><strong>IP Address:</strong> ${cam.ip}</div>`;
-            html += `<div><strong>RTSP Stream:</strong> <span class="badge ${cam.rtsp_valid ? 'badge-success' : ''}">${'Valid' || 'Invalid'}</span></div>`;
-            
-            if (cam.ports_open) {
-                html += `<div><strong>Open Ports:</strong> ${cam.ports_open.join(', ')}</div>`;
+            h2 {
+                font-size: 1.2rem;
+                margin-top: 30px;
+                color: #555;
             }
 
-            if (latencyObj) {
-                html += `<div><strong>Latency:</strong> ${latencyObj.latency_ms}ms</div>`;
+            .text-center {
+                font-size: 0.8rem;
+                margin-top: 10px;
+                color: #aaa;
             }
 
-            if (hasStream) {
-                html += `<div>
+            .logo img {
+                display: block;
+                margin-left: auto;
+                margin-right: auto;
+                width: /* specify a width smaller than the container */;
+            }
+
+            /* --- CARD LAYOUT UPDATES --- */
+            .card {
+                display: flex; /* Enable Flexbox */
+                justify-content: space-between; /* Space between text and image */
+                align-items: flex-start; /* Align items to the top */
+                border: 1px solid #ddd;
+                background: #fafafa;
+                border-radius: 6px;
+                padding: 15px;
+                margin-bottom: 15px;
+            }
+
+            .card-content {
+                flex: 1; /* Takes up all available space on the left */
+                padding-right: 20px; /* Buffer between text and image */
+            }
+
+            .card-thumbnail {
+                width: 160px; /* Fixed width for thumbnail */
+                height: 100px; /* Fixed height */
+                background: #e0e0e0; /* Placeholder background */
+                border-radius: 4px;
+                object-fit: cover; /* Ensures image covers the box without stretching */
+                flex-shrink: 0; /* Prevents image from shrinking on small screens */
+                border: 1px solid #ccc;
+
+                /* Center text for the placeholder */
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                color: #777;
+                font-size: 0.8rem;
+                text-align: center;
+            }
+
+            .card strong {
+                color: #0056b3;
+            }
+            .error {
+                color: #d9534f;
+                background: #fdf7f7;
+                padding: 10px;
+                border: 1px solid #d9534f;
+                border-radius: 4px;
+            }
+            .badge {
+                display: inline-block;
+                padding: 2px 6px;
+                font-size: 0.8rem;
+                border-radius: 4px;
+                color: white;
+                background: #6c757d;
+            }
+            .badge-success {
+                background: #28a745;
+            }
+
+            .emoji-heart {
+                cursor: default;
+
+                /* The Animation Configuration */
+                animation-name: emoji-pulse;
+                animation-duration: 1.2s;
+                animation-timing-function: ease-in-out;
+                animation-iteration-count: infinite;
+            }
+
+            /* The Animation Keyframes */
+            @keyframes emoji-pulse {
+                0% {
+                    transform: scale(1);
+                }
+                15% {
+                    transform: scale(1.2); /* Grow quickly */
+                }
+                30% {
+                    transform: scale(1); /* Shrink back */
+                }
+                45% {
+                    transform: scale(1.15); /* Grow slightly less */
+                }
+                60% {
+                    transform: scale(1); /* Rest */
+                }
+                100% {
+                    transform: scale(1); /* Wait */
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="logo"><img src="logo.png" width="300" /></div>
+
+            <h1>Streamer Dashboard</h1>
+
+            <div id="subnet-section">
+                <h2>Network Configuration</h2>
+                <div id="subnet-display">Loading...</div>
+            </div>
+
+            <div id="cameras-section">
+                <h2>Detected Cameras</h2>
+                <div id="cameras-display">Loading...</div>
+            </div>
+
+            <div id="processes-section">
+                <h2>Streamers</h2>
+                <div id="processes-display">Loading...</div>
+            </div>
+        </div>
+
+        <div class="text-center">
+            Copyright &copy; 2026 LUCEON LLC. All rights reserved.
+            <div class="emoji-heart">❤️</div>
+        </div>
+
+        <script>
+            const SUBNET_FILE = 'subnet.json';
+            const CAMERAS_FILE = 'cameras.json';
+            const LATENCY_FILE = 'latency.json';
+            const PROCESSES_FILE = 'processes.json';
+
+            async function loadJson(url) {
+                try {
+                    const response = await fetch(url);
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    return await response.json();
+                } catch (error) {
+                    console.error('Fetch Error:', error);
+                    return null;
+                }
+            }
+
+            async function renderSubnet() {
+                const container = document.getElementById('subnet-display');
+                const data = await loadJson(SUBNET_FILE);
+
+                if (!data) {
+                    container.innerHTML = `<div class="error">Could not load <strong>${SUBNET_FILE}</strong>.</div>`;
+                    return;
+                }
+
+                let html = `<div class="card"><div class="card-content">`;
+                if (Array.isArray(data)) {
+                    html += `<strong>Subnet List:</strong> ${data.join(', ')}`;
+                } else if (typeof data === 'object') {
+                    for (const [key, value] of Object.entries(data)) {
+                        html += `<div><strong>${key}:</strong> ${value}</div>`;
+                    }
+                } else {
+                    html += `<strong>Value:</strong> ${data}`;
+                }
+                html += `</div></div>`;
+                container.innerHTML = html;
+            }
+
+            async function renderCameras() {
+                const container = document.getElementById('cameras-display');
+                const cameras = await loadJson(CAMERAS_FILE);
+                const latency = await loadJson(LATENCY_FILE);
+
+                if (!cameras) {
+                    container.innerHTML = `<div class="error">Could not load <strong>${CAMERAS_FILE}</strong>.</div>`;
+                    return;
+                }
+                if (cameras.length === 0) {
+                    container.innerHTML = `<p>No cameras found in scan.</p>`;
+                    return;
+                }
+
+                let html = '';
+                cameras.forEach(cam => {
+                    const hasStream = cam.stream_uri && !cam.error;
+                    const latencyObj = latency[cam.ip];
+
+                    // --- START CARD ---
+                    html += `<div class="card">`;
+
+                    // --- LEFT SIDE: CONTENT ---
+                    html += `<div class="card-content">`;
+                    html += `<div><strong>IP Address:</strong> ${cam.ip}</div>`;
+                    html += `<div><strong>RTSP Stream:</strong> <span class="badge ${cam.rtsp_valid ? 'badge-success' : ''}">${'Valid' || 'Invalid'}</span></div>`;
+
+                    if (cam.ports_open) {
+                        html += `<div><strong>Open Ports:</strong> ${cam.ports_open.join(', ')}</div>`;
+                    }
+
+                    if (latencyObj) {
+                        html += `<div><strong>Latency:</strong> ${latencyObj.latency_ms}ms</div>`;
+                    }
+
+                    if (hasStream) {
+                        html += `<div>
                             <strong>Stream URI:</strong> <a href="${cam.stream_uri}">${cam.stream_uri}</a>
                          </div>`;
-            } else if (cam.error) {
-                html += `<div style="color:#d9534f; margin-top:5px;"><strong>Error:</strong> ${cam.error}</div>`;
+                    } else if (cam.error) {
+                        html += `<div style="color:#d9534f; margin-top:5px;"><strong>Error:</strong> ${cam.error}</div>`;
+                    }
+                    html += `</div>`; // End Left Content
+
+                    // --- RIGHT SIDE: THUMBNAIL ---
+                    // If the JSON has a 'snapshot_url', display image. Otherwise, show placeholder.
+                    if (cam.snapshot_url) {
+                        html += `<img src="${cam.snapshot_url}" class="card-thumbnail" alt="Preview" onerror="this.style.display='none'">`;
+                    } else {
+                        html += `<div class="card-thumbnail">No Preview</div>`;
+                    }
+
+                    html += `</div>`;
+                    // --- END CARD ---
+                });
+
+                container.innerHTML = html;
             }
-            html += `</div>`; // End Left Content
 
-            // --- RIGHT SIDE: THUMBNAIL ---
-            // If the JSON has a 'snapshot_url', display image. Otherwise, show placeholder.
-            if (cam.snapshot_url) {
-                html += `<img src="${cam.snapshot_url}" class="card-thumbnail" alt="Preview" onerror="this.style.display='none'">`;
-            } else {
-                html += `<div class="card-thumbnail">No Preview</div>`;
+            async function renderProcesses() {
+                const container = document.getElementById('processes-display');
+                const processes = await loadJson(PROCESSES_FILE);
+
+                if (!processes) {
+                    container.innerHTML = `<div class="error">Could not load <strong>${PROCESSES_FILE}</strong>.</div>`;
+                    return;
+                }
+                if (processes.length === 0) {
+                    container.innerHTML = `<p>No running processes found.</p>`;
+                    return;
+                }
+
+                let html = '';
+                Object.entries(processes).forEach(([ip, p]) => {
+                    // --- START CARD ---
+                    html += `<div class="card">`;
+
+                    // --- LEFT SIDE: CONTENT ---
+                    html += `<div class="card-content">`;
+                    html += `<div><strong>PID:</strong> ${p.pid}</div>`;
+                    html += `<div><strong>CPU:</strong> ${p.cpu_percent}%</div>`;
+                    html += `<div><strong>Memory:</strong> ${p.memory_mb} MB</div>`;
+                    html += `<div><strong>Status:</strong> ${p.status}</div>`;
+                    html += `<div><strong>Time:</strong> ${p.ts}</div>`;
+                    html += `</div>`; // End Left Content
+                    html += `</div>`;
+                    // --- END CARD ---
+                });
+
+                container.innerHTML = html;
             }
 
-            html += `</div>`; 
-            // --- END CARD ---
-        });
-
-        container.innerHTML = html;
-    }
-
-    async function renderProcesses() {
-        const container = document.getElementById('processes-display');
-        const processes = await loadJson(PROCESSES_FILE);
-
-        if (!processes) {
-            container.innerHTML = `<div class="error">Could not load <strong>${PROCESSES_FILE}</strong>.</div>`;
-            return;
-        }
-        if (processes.length === 0) {
-            container.innerHTML = `<p>No running processes found.</p>`;
-            return;
-        }
-
-        let html = '';
-        Object.entries(processes).forEach(([ip, p]) => {
-
-            // --- START CARD ---
-            html += `<div class="card">`;
-
-            // --- LEFT SIDE: CONTENT ---
-            html += `<div class="card-content">`;
-            html += `<div><strong>PID:</strong> ${p.pid}</div>`;
-            html += `<div><strong>CPU:</strong> ${p.cpu_percent}%</div>`;
-            html += `<div><strong>Memory:</strong> ${p.memory_mb} MB</div>`;
-            html += `<div><strong>Status:</strong> ${p.status}</div>`;
-            html += `<div><strong>Time:</strong> ${p.ts}</div>`;
-            html += `</div>`; // End Left Content
-            html += `</div>`;
-            // --- END CARD ---
-        });
-
-        container.innerHTML = html;
-    }
-
-    renderSubnet();
-    renderCameras();
-    renderProcesses();
-
-</script>
-
-</body>
+            renderSubnet();
+            renderCameras();
+            renderProcesses();
+        </script>
+    </body>
 </html>
