@@ -410,7 +410,9 @@ class SharedRTSPPlayer:
     Uses MediaRelay to efficiently distribute frames without decoding/encoding for each client.
     """
 
-    def __init__(self, rtsp_url: str, device_id: str, reconnect_interval: int = 30):
+    def __init__(
+        self, rtsp_url: str, device_id: str, config: dict, reconnect_interval: int = 30
+    ):
         """
         Initialize the shared RTSP player.
 
@@ -419,14 +421,12 @@ class SharedRTSPPlayer:
             device_id: Unique identifier for this player instance
             reconnect_interval: Seconds between connection health checks
         """
-        logger.debug(f"[cam   ] {device_id} ~~~ new SharedRTSPPlayer()")
+        logger.debug("[cam   ] ~~~ new SharedRTSPPlayer()")
 
         self.rtsp_url = rtsp_url
-        self.reconnect_interval = reconnect_interval
         self.device_id = device_id
 
         self.player: Optional[MediaPlayer] = None
-        self.relay: Optional[MediaRelay] = None
 
         self._active_clients = 0
         self._lock = asyncio.Lock()
@@ -436,12 +436,54 @@ class SharedRTSPPlayer:
         self._last_frame_time = time.time()
         self._ready = asyncio.Event()
 
+        # configuration
+        cfg = (
+            config["camera"]
+            if "camera" in config and isinstance(config["camera"], dict)
+            else {}
+        )
+
+        try:
+            self.reconnect_interval = int(cfg.get("reconnect_interval", 30))
+        except Exception:
+            logger.error(
+                "[config]: Invalid 'camera.reconnect_interval' value in config, must be int."
+            )
+            sys.exit(1)
+
+        try:
+            self.video_width = int(cfg.get("video_width", 1024))
+        except Exception:
+            logger.error(
+                "[config]: Invalid 'camera.video_width' value in config, must be int."
+            )
+            sys.exit(1)
+
+        try:
+            self.video_height = int(cfg.get("video_height", 768))
+        except Exception:
+            logger.error(
+                "[config]: Invalid 'camera.video_height' value in config, must be int."
+            )
+            sys.exit(1)
+
+        try:
+            self.fps = int(cfg.get("fps", 15))
+        except Exception:
+            logger.error("[config]: Invalid 'camera.fps' value in config, must be int.")
+            sys.exit(1)
+
     def _create_player(self):
         """Create the MediaPlayer with appropriate settings for the source type."""
-        logger.info(f"[cam   ] {self.device_id} ~~~ creating player: {self.rtsp_url}")
+        resolution = "{}x{}".format(str(self.video_width), str(self.video_height))
+
+        logger.info(
+            "[cam   ] ~~~ creating player: %s (resolution: %s)",
+            self.rtsp_url,
+            resolution,
+        )
 
         self._last_frame_time = time.time()
-        self.relay = MediaRelay()
 
         is_v4l2_device = self.rtsp_url.startswith("/dev/video")
         is_rtsp = self.rtsp_url.startswith("rtsp://")
@@ -449,44 +491,45 @@ class SharedRTSPPlayer:
         try:
             if is_v4l2_device:
                 logger.info(
-                    f"[cam   ] {self.device_id} ~~~ ^ using v4l2 device: {self.rtsp_url}"
+                    "[cam   ] %s ~~~  ^ using v4l2 device: %s",
+                    self.device_id,
+                    self.rtsp_url,
                 )
                 self.player = MediaPlayer(
                     self.rtsp_url,
                     format="v4l2",
                     options={
                         "input_format": "yuv420p",
-                        "framerate": "15",
+                        "framerate": str(self.fps),
                     },
                 )
             elif is_rtsp:
-                logger.info(f"[cam   ] {self.device_id} ~~~ ^ using RTSP stream")
+                logger.info("[cam   ] ~~~ ^ using RTSP stream")
                 self.player = MediaPlayer(
                     self.rtsp_url,
-                    format="rtsp",
+                    # format="rtsp",
                     options={
-                        # "video_size": "1024x768",
+                        # "video_size": str(resolution),
                         "rtsp_transport": "tcp",
-                        # "rtsp_flags": "prefer_tcp",
-                        "fflags": "nobuffer+flush_packets",
-                        "flags": "low_delay",
-                        "max_delay": "0",
-                        "buffer_size": "1024000",
-                        "timeout": "5000000",
-                        "reorder_queue_size": "0",
-                        # "framerate": "20", # Set the target FPS (e.g., 60)
-                        "probesize": "32",  # Reduce initial analysis time
-                        "analyzeduration": "0",  # Start stream immediately
-                        "preset": "ultrafast",  # Test
-                        # "tune": "zerolatency", # Test
-                        "vn": "0",  # video enabled
-                        "an": "1",  # audio disabled
+                        # # "rtsp_flags": "prefer_tcp",
+                        # "fflags": "nobuffer+flush_packets",
+                        "threads": "1",
+                        # "flags": "low_delay",
+                        # "max_delay": "0",
+                        # "buffer_size": "1024000",
+                        # "timeout": "5000000",
+                        # "reorder_queue_size": "0",
+                        # "framerate": str(self.fps),  # Set the target FPS (e.g., 60)
+                        # "probesize": "32",  # Reduce initial analysis time
+                        # "analyzeduration": "0",  # Start stream immediately
+                        # "preset": "ultrafast",  # Test
+                        # # "tune": "zerolatency", # Test
+                        # "vn": "0",  # video enabled
+                        # "an": "1",  # audio disabled
                     },
                 )
             else:
-                logger.info(
-                    f"[cam   ] {self.device_id} ~~~ ^ auto-detecting source format"
-                )
+                logger.info("[cam   ] ~~~ ^ auto-detecting source format")
                 self.player = MediaPlayer(self.rtsp_url)
 
             if not self.player or not self.player.video:
@@ -494,7 +537,8 @@ class SharedRTSPPlayer:
 
         except Exception as e:
             logger.error(
-                f"[cam   ] !!! {self.device_id} | failed to create MediaPlayer: {e}"
+                "[cam   ] !!! failed to create MediaPlayer: %s",
+                str(e),
             )
             raise
 
@@ -511,7 +555,7 @@ class SharedRTSPPlayer:
                     player._last_frame_time = time.time()
                     if not player._ready.is_set():
                         logger.info(
-                            f"[cam   ] {self.device_id} ~~~ first frame received from RTSP stream"
+                            "[cam   ] ~~~ first frame received from RTSP stream"
                         )
                         player._ready.set()
                 return frame
@@ -523,9 +567,7 @@ class SharedRTSPPlayer:
                     and player._active_clients > 0
                     and not player._stopping
                 ):
-                    logger.error(
-                        f"[cam   ] !!! {self.device_id} | error receiving frame: {e}"
-                    )
+                    logger.error("[cam   ] !!! error receiving frame: %s", str(e))
                 raise
 
         self.player.video.recv = recv_wrapper
@@ -533,6 +575,8 @@ class SharedRTSPPlayer:
     async def _start_locked(self):
         """Start the player (must be called with lock held)."""
         if self.player is None:
+            self.relay = MediaRelay()
+
             self._create_player()
             self._start_watchdog()
 
@@ -690,18 +734,14 @@ class SharedRTSPPlayer:
         """
         async with self._lock:
             if not self.player or not self.player.video:
-                logger.warning(
-                    f"[cam   ] {self.device_id} ~~~ RTSP player not initialized"
-                )
+                logger.warning("[cam   ] ~~~ RTSP player not initialized")
                 return None, False
 
             if use_relay and self.relay:
                 # CRITICAL: Use buffered=False to prevent memory accumulation
                 # This drops frames if the consumer can't keep up
                 track = self.relay.subscribe(self.player.video, buffered=False)
-                logger.debug(
-                    f"[cam   ] {self.device_id} ~~~ created relay track with buffered=False"
-                )
+                logger.debug("[cam   ] ~~~ created relay track with buffered=False")
 
                 return track, True  # is_relay=True
             else:
@@ -709,7 +749,7 @@ class SharedRTSPPlayer:
                 wrapped_track = NonBufferedVideoTrack(self.player.video)
                 await wrapped_track.start()
                 logger.debug(
-                    f"[cam   ] {self.device_id} ~~~ created non-buffered wrapper track (no relay)"
+                    "[cam   ] ~~~ created non-buffered wrapper track (no relay)"
                 )
 
                 return (
@@ -731,6 +771,7 @@ class MQTTPublisher:
     def __init__(self, cfg: dict):
         """Init"""
 
+        self.config = cfg
         self.settings = build_mqtt_settings(cfg, rtsp_url=args.rtsp_url)
         self.peers = {}
 
@@ -972,12 +1013,12 @@ class MQTTPublisher:
 
         if not remote_id:
             logger.warning(
-                "[mqtt  ] %s !!! STREAM REQUEST - unknown client id",
+                "[mqtt  ] %s !!! STREAM REQUESTED - unknown client id",
                 "????????????????",
             )
             return
 
-        logger.debug("[mqtt  ] %s !!! STREAM REQUEST", remote_id)
+        logger.debug("[mqtt  ] %s !!! STREAM REQUESTED", remote_id)
 
         if not payload or not isinstance(payload, dict):
             logger.warning(
@@ -1071,7 +1112,9 @@ class MQTTPublisher:
         # add local track
         try:
             if self.camera is None:
-                self.camera = SharedRTSPPlayer(args.rtsp_url, self.device_id)
+                self.camera = SharedRTSPPlayer(
+                    args.rtsp_url, self.device_id, self.config
+                )
 
             await self.camera.add_client(remote_id)
 
@@ -1150,7 +1193,7 @@ class MQTTPublisher:
         if not ctx:
             # This is common during rapid reconnects, log at debug level
             logger.warning(
-                "[webrtc] %s <<< ignoring ICE from client - no PeerConnection (likely reconnecting)",
+                "[webrtc] %s <<< got remote ICE !!! ignoring - PeerConnection() not exist",
                 remote_id,
             )
             return
@@ -1158,7 +1201,7 @@ class MQTTPublisher:
         if ctx.pc.connectionState in ["connected", "closed", "failed"]:
             # Expected during cleanup, log at debug level
             logger.debug(
-                "[webrtc] %s <<< ignoring ICE from client - connection state: %s",
+                "[webrtc] %s <<< got remote ICE !!! ignoring - wrong connection state: %s",
                 remote_id,
                 ctx.pc.connectionState,
             )
@@ -1338,6 +1381,21 @@ async def run_app(args):
         if mqtt_pub and mqtt_pub.camera:
             logger.info("[main  ] stopping RTSP player")
             await mqtt_pub.camera.shutdown()
+
+        if mqtt_pub.device_id and mqtt_pub._connected and not mqtt_pub._closed:
+            status_data = {
+                "device_id": mqtt_pub.device_id,
+                "ts": int(time.time()),
+                "status": "shutdown",
+            }
+
+            topic = f"device/{mqtt_pub.device_id}/status"
+            mqtt_pub.publish(topic, status_data)
+            logger.debug(
+                "[mqtt  ] %s | device status - sending shutdown info - %s",
+                mqtt_pub.device_id,
+                topic,
+            )
 
         if mqtt_pub and mqtt_pub.peers:
             logger.debug(f"[main  ] closing {len(mqtt_pub.peers)} peer connections...")
